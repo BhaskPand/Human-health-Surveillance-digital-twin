@@ -95,8 +95,8 @@ python monitor.py
 ```bash
 # Terminal 4:
 cd phase3_backend
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+pip3 install -r requirements.txt
+python3 main:app --host 0.0.0.0 --port 8000
 
 # API Docs: http://localhost:8000/docs
 # Live Vitals: http://localhost:8000/vitals/current
