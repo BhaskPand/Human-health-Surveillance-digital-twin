@@ -78,6 +78,8 @@ cp -r phase1_ml/models phase3_backend/models
 ```bash
 # Terminal 1: Start MQTT broker
 mosquitto -v
+# For brew
+brew services start mosquitto
 
 # Terminal 2: Start patient simulator
 cd phase2_mqtt
