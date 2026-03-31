@@ -1,0 +1,31 @@
+{
+  "features": [
+    "Movement_Mag",
+    "HR",
+    "SpO2",
+    "HR_SpO2_ratio",
+    "movement_x_HR",
+    "SpO2_deficit"
+  ],
+  "base_features": [
+    "Movement_Mag",
+    "HR",
+    "SpO2"
+  ],
+  "classes": [
+    0,
+    1
+  ],
+  "metrics": {
+    "accuracy": 1.0,
+    "roc_auc": 1.0,
+    "f1_score": 1.0,
+    "cv_mean": 1.0,
+    "cv_std": 0.0
+  },
+  "thresholds": {
+    "critical": 0.85,
+    "warning": 0.6,
+    "normal": 0.0
+  }
+}

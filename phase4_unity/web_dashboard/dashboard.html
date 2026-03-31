@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Digital Twin — ICU Monitor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  /* ── Reset & Variables ─────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:         #0a0e1a;
+    --surface:    #111827;
+    --surface2:   #1a2236;
+    --border:     #1e2d45;
+    --text:       #e2e8f0;
+    --muted:      #64748b;
+    --green:      #00d4aa;
+    --yellow:     #f59e0b;
+    --red:        #ef4444;
+    --blue:       #3b82f6;
+    --cyan:       #06b6d4;
+    --pulse:      #00d4aa;
+    --font-mono:  'Courier New', monospace;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text);
+               font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+  /* ── Top Bar ───────────────────────────────────────────── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; }
+  .logo span { color: var(--green); }
+  .badge {
+    padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+    background: rgba(0,212,170,0.15); color: var(--green); border: 1px solid var(--green);
+  }
+  .topbar-right { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--muted); }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    animation: blink 1.5s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+
+  /* ── Layout ────────────────────────────────────────────── */
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr 300px;
+    grid-template-rows: 100vh;
+    height: calc(100vh - 49px);
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ───────────────────────────────────────────── */
+  .sidebar {
+    background: var(--surface); border-right: 1px solid var(--border);
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+  }
+  .sidebar-title { font-size: 11px; font-weight: 600; color: var(--muted);
+                   text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .patient-card {
+    padding: 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface2); cursor: pointer; transition: all 0.2s;
+  }
+  .patient-card:hover { border-color: var(--green); }
+  .patient-card.active { border-color: var(--green); background: rgba(0,212,170,0.08); }
+  .patient-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .patient-ward { font-size: 11px; color: var(--muted); }
+  .patient-risk {
+    display: inline-block; margin-top: 6px; padding: 2px 7px;
+    border-radius: 3px; font-size: 10px; font-weight: 700;
+  }
+  .risk-NORMAL   { background: rgba(0,212,170,0.15); color: var(--green); }
+  .risk-WARNING  { background: rgba(245,158,11,0.15); color: var(--yellow); }
+  .risk-CRITICAL { background: rgba(239,68,68,0.15);  color: var(--red); animation: pulse-red 1s infinite; }
+  .risk-UNKNOWN  { background: rgba(100,116,139,0.15); color: var(--muted); }
+  @keyframes pulse-red { 0%,100% { opacity:1 } 50% { opacity:0.5 } }
+
+  /* ── Main Area ─────────────────────────────────────────── */
+  .main { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* ── Vitals Row ────────────────────────────────────────── */
+  .vitals-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+  .vital-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; position: relative; overflow: hidden;
+  }
+  .vital-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .vital-hr::before   { background: var(--red); }
+  .vital-spo2::before { background: var(--cyan); }
+  .vital-temp::before { background: var(--yellow); }
+  .vital-mov::before  { background: var(--blue); }
+
+  .vital-label { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: 1px; margin-bottom: 6px; }
+  .vital-value { font-size: 36px; font-weight: 700; font-family: var(--font-mono); line-height: 1; }
+  .vital-unit  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .vital-trend { position: absolute; top: 12px; right: 12px; font-size: 16px; }
+
+  .vital-hr   .vital-value { color: var(--red); }
+  .vital-spo2 .vital-value { color: var(--cyan); }
+  .vital-temp .vital-value { color: var(--yellow); }
+  .vital-mov  .vital-value { color: var(--blue); }
+
+  /* Heartbeat animation */
+  .heartbeat { display: flex; align-items: flex-end; gap: 1px; height: 24px; margin-top: 8px; }
+  .heartbeat span {
+    width: 2px; background: var(--red); border-radius: 1px;
+    animation: beat 1.2s ease-in-out infinite;
+  }
+  .heartbeat span:nth-child(1)  { height: 4px;  animation-delay: 0s;   }
+  .heartbeat span:nth-child(2)  { height: 8px;  animation-delay: 0.05s;}
+  .heartbeat span:nth-child(3)  { height: 20px; animation-delay: 0.1s; }
+  .heartbeat span:nth-child(4)  { height: 4px;  animation-delay: 0.15s;}
+  .heartbeat span:nth-child(5)  { height: 14px; animation-delay: 0.2s; }
+  .heartbeat span:nth-child(6)  { height: 6px;  animation-delay: 0.25s;}
+  .heartbeat span:nth-child(7)  { height: 3px;  animation-delay: 0.3s; }
+  .heartbeat span:nth-child(8)  { height: 4px;  animation-delay: 0.35s;}
+  @keyframes beat { 0%,100% { transform: scaleY(1) } 50% { transform: scaleY(0.6) } }
+
+  /* ── Charts ────────────────────────────────────────────── */
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .chart-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .chart-title { font-size: 12px; font-weight: 600; color: var(--muted);
+                 text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
+  .chart-wrap  { height: 160px; position: relative; }
+
+  /* ── Risk Meter ────────────────────────────────────────── */
+  .risk-section { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: 10px; padding: 16px; }
+  .risk-title   { font-size: 12px; font-weight: 600; color: var(--muted);
+                  text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px; }
+  .risk-bar-wrap { height: 16px; background: var(--surface2); border-radius: 8px; overflow: hidden; }
+  .risk-bar      { height: 100%; border-radius: 8px; transition: width 0.5s ease, background 0.5s ease; }
+  .risk-labels   { display: flex; justify-content: space-between; margin-top: 6px;
+                   font-size: 10px; color: var(--muted); }
+  .risk-pct      { text-align: center; margin-top: 8px; font-size: 28px; font-weight: 700;
+                   font-family: var(--font-mono); }
+
+  /* ── Alert Panel (right sidebar) ───────────────────────── */
+  .alert-panel {
+    background: var(--surface); border-left: 1px solid var(--border);
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+  }
+  .alert-panel-title { font-size: 11px; font-weight: 600; color: var(--muted);
+                       text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .alert-item {
+    padding: 10px 12px; border-radius: 8px; border-left: 3px solid;
+    background: var(--surface2); font-size: 12px;
+  }
+  .alert-CRITICAL { border-color: var(--red); }
+  .alert-WARNING  { border-color: var(--yellow); }
+  .alert-FALL     { border-color: var(--blue); }
+  .alert-NORMAL   { border-color: var(--green); }
+
+  .alert-type { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+  .alert-CRITICAL .alert-type { color: var(--red); }
+  .alert-WARNING  .alert-type { color: var(--yellow); }
+  .alert-FALL     .alert-type { color: var(--blue); }
+  .alert-NORMAL   .alert-type { color: var(--green); }
+
+  .alert-time  { color: var(--muted); font-size: 10px; }
+  .alert-vals  { margin-top: 4px; color: var(--text); }
+
+  /* ── Connection Banner ─────────────────────────────────── */
+  .conn-banner {
+    display: none; position: fixed; top: 49px; left: 0; right: 0; z-index: 99;
+    background: rgba(239,68,68,0.9); color: white; text-align: center;
+    padding: 8px; font-size: 13px; font-weight: 500;
+  }
+  .conn-banner.visible { display: block; }
+
+  /* ── No-data placeholder ───────────────────────────────── */
+  .placeholder { color: var(--muted); font-style: italic; font-size: 12px;
+                 text-align: center; padding: 20px; }
+
+  /* ── Fall alert overlay ────────────────────────────────── */
+  .fall-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(239,68,68,0.3); pointer-events: none;
+    animation: flash 0.5s ease-in-out 4;
+  }
+  @keyframes flash { 0%,100% { opacity:0 } 50% { opacity:1 } }
+</style>
+</head>
+<body>
+
+<!-- Connection banner -->
+<div class="conn-banner" id="connBanner">
+  ⚠️  WebSocket disconnected — attempting to reconnect...
+</div>
+
+<!-- Fall overlay -->
+<div class="fall-overlay" id="fallOverlay"></div>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">Digital<span>Twin</span></div>
+    <div class="badge">ICU Monitor</div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Connecting…</span>
+    <span id="clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Left: Patient List -->
+  <div class="sidebar">
+    <div class="sidebar-title">Patients</div>
+    <div id="patientList">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+
+  <!-- Center: Main Monitor -->
+  <div class="main">
+
+    <!-- Vitals Cards -->
+    <div class="vitals-row">
+      <div class="vital-card vital-hr">
+        <div class="vital-label">Heart Rate</div>
+        <div class="vital-value" id="valHR">--</div>
+        <div class="vital-unit">bpm</div>
+        <div class="vital-trend" id="trendHR">—</div>
+        <div class="heartbeat">
+          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+      <div class="vital-card vital-spo2">
+        <div class="vital-label">SpO₂</div>
+        <div class="vital-value" id="valSpO2">--</div>
+        <div class="vital-unit">%</div>
+        <div class="vital-trend" id="trendSpO2">—</div>
+      </div>
+      <div class="vital-card vital-temp">
+        <div class="vital-label">Temperature</div>
+        <div class="vital-value" id="valTemp">--</div>
+        <div class="vital-unit">°C</div>
+      </div>
+      <div class="vital-card vital-mov">
+        <div class="vital-label">Movement</div>
+        <div class="vital-value" id="valMov">--</div>
+        <div class="vital-unit">g</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-title">Heart Rate — last 60 s</div>
+        <div class="chart-wrap">
+          <canvas id="chartHR"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">SpO₂ — last 60 s</div>
+        <div class="chart-wrap">
+          <canvas id="chartSpO2"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Risk Meter -->
+    <div class="risk-section">
+      <div class="risk-title">ML Risk Score</div>
+      <div class="risk-bar-wrap">
+        <div class="risk-bar" id="riskBar" style="width:0%; background: var(--green);"></div>
+      </div>
+      <div class="risk-labels">
+        <span>0% — Normal</span><span>60% — Warning</span><span>85% — Critical</span>
+      </div>
+      <div class="risk-pct" id="riskPct" style="color: var(--green);">—%</div>
+    </div>
+
+  </div>
+
+  <!-- Right: Alert Log -->
+  <div class="alert-panel">
+    <div class="alert-panel-title">Alert Log</div>
+    <div id="alertLog">
+      <div class="placeholder">No alerts yet</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────
+const API_BASE  = "http://localhost:8000";
+const WS_BASE   = "ws://localhost:8000";
+const PATIENT   = "patient_001";  // change to your patient ID
+
+// ── State ──────────────────────────────────────────────────
+let ws          = null;
+let hrHistory   = Array(60).fill(null);
+let spo2History = Array(60).fill(null);
+let labels      = Array.from({length:60}, (_,i) => `-${59-i}s`);
+let alertList   = [];
+const MAX_ALERTS = 50;
+
+// ── Clock ──────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-IN', {hour12: false});
+}, 1000);
+
+// ── Chart Setup ────────────────────────────────────────────
+function makeChart(canvasId, color, label, min, max) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label,
+        data: canvasId === 'chartHR' ? hrHistory : spo2History,
+        borderColor:     color,
+        backgroundColor: color + '15',
+        borderWidth:     1.5,
+        pointRadius:     0,
+        fill:            true,
+        tension:         0.4,
+        spanGaps:        true,
+      }]
+    },
+    options: {
+      animation:   false,
+      responsive:  true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: {
+          min, max,
+          grid:  { color: '#1e2d45' },
+          ticks: { color: '#64748b', font: { size: 10 } }
+        }
+      }
+    }
+  });
+}
+
+const hrChart   = makeChart('chartHR',   '#ef4444', 'HR',   40, 180);
+const spo2Chart = makeChart('chartSpO2', '#06b6d4', 'SpO2', 80, 100);
+
+// ── Update UI ──────────────────────────────────────────────
+function updateVitals(data) {
+  const inf = data.inference || {};
+
+  // Numeric values
+  set('valHR',   data.HR   != null ? data.HR.toFixed(1)   : '--');
+  set('valSpO2', data.SpO2 != null ? data.SpO2.toFixed(1) : '--');
+  set('valTemp', data.temperature != null ? data.temperature.toFixed(1) : '--');
+  set('valMov',  data.movement    != null ? data.movement.toFixed(2)    : '--');
+
+  // Charts
+  hrHistory.shift();   hrHistory.push(data.HR   ?? null);
+  spo2History.shift(); spo2History.push(data.SpO2 ?? null);
+  hrChart.update('quiet');
+  spo2Chart.update('quiet');
+
+  // Trends
+  set('trendHR',   trendArrow(hrHistory));
+  set('trendSpO2', trendArrow(spo2History));
+
+  // Risk meter
+  const prob = inf.probability ?? 0;
+  const pct  = (prob * 100).toFixed(1);
+  const bar  = document.getElementById('riskBar');
+  const pctEl= document.getElementById('riskPct');
+  bar.style.width = `${pct}%`;
+
+  if (prob >= 0.85) {
+    bar.style.background = 'var(--red)';
+    pctEl.style.color    = 'var(--red)';
+  } else if (prob >= 0.60) {
+    bar.style.background = 'var(--yellow)';
+    pctEl.style.color    = 'var(--yellow)';
+  } else {
+    bar.style.background = 'var(--green)';
+    pctEl.style.color    = 'var(--green)';
+  }
+  pctEl.textContent = `${pct}%`;
+
+  // Fall overlay
+  if (data.fall === 1) {
+    const overlay = document.getElementById('fallOverlay');
+    overlay.style.display = 'block';
+    setTimeout(() => { overlay.style.display = 'none'; }, 2500);
+    addAlert({ alert_type: 'FALL', ...data });
+  }
+
+  // Add to alert log for warnings/critical
+  if (inf.risk === 'CRITICAL' || inf.risk === 'WARNING') {
+    addAlert({ alert_type: inf.risk, ...data });
+  }
+
+  // Update patient card
+  updatePatientCard(data.patient_id, inf.risk || 'NORMAL');
+}
+
+function trendArrow(arr) {
+  const valid = arr.filter(v => v != null);
+  if (valid.length < 5) return '—';
+  const diff = valid[valid.length-1] - valid[0];
+  if (diff > 8)  return '↑↑';
+  if (diff > 3)  return '↑';
+  if (diff < -8) return '↓↓';
+  if (diff < -3) return '↓';
+  return '→';
+}
+
+function addAlert(data) {
+  const ts  = new Date().toLocaleTimeString('en-IN', {hour12: false});
+  const inf = data.inference || {};
+  const typ = data.alert_type || inf.risk || 'INFO';
+
+  alertList.unshift({ ts, typ, hr: data.HR, spo2: data.SpO2, prob: inf.probability });
+  if (alertList.length > MAX_ALERTS) alertList.pop();
+
+  const log = document.getElementById('alertLog');
+  log.innerHTML = alertList.map(a => `
+    <div class="alert-item alert-${a.typ}">
+      <div class="alert-type">${a.typ === 'FALL' ? '🚨 FALL DETECTED' :
+                                a.typ === 'CRITICAL' ? '🔴 CRITICAL' :
+                                a.typ === 'WARNING'  ? '🟡 WARNING' : '🟢 NORMAL'}</div>
+      <div class="alert-time">${a.ts}</div>
+      <div class="alert-vals">HR: ${a.hr?.toFixed(1) ?? '--'} bpm | SpO₂: ${a.spo2?.toFixed(1) ?? '--'}%
+        ${a.prob != null ? `| Risk: ${(a.prob*100).toFixed(0)}%` : ''}</div>
+    </div>
+  `).join('');
+}
+
+function updatePatientCard(id, risk) {
+  const el = document.getElementById(`card-${id}`);
+  if (el) {
+    el.querySelector('.patient-risk').className = `patient-risk risk-${risk}`;
+    el.querySelector('.patient-risk').textContent = risk;
+  }
+}
+
+function set(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+// ── Patient Sidebar ─────────────────────────────────────────
+async function loadPatients() {
+  try {
+    const r   = await fetch(`${API_BASE}/api/patients`);
+    const res = await r.json();
+    const list = document.getElementById('patientList');
+
+    if (!res.patients?.length) {
+      // Demo card while waiting for real data
+      list.innerHTML = `
+        <div class="patient-card active" id="card-patient_001">
+          <div class="patient-name">Patient 001</div>
+          <div class="patient-ward">ICU — Bed 1</div>
+          <span class="patient-risk risk-UNKNOWN" id="risk-patient_001">WAITING</span>
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = res.patients.map(p => `
+      <div class="patient-card active" id="card-${p.patient_id}">
+        <div class="patient-name">${p.patient_id.replace('_',' ').toUpperCase()}</div>
+        <div class="patient-ward">ICU — Bed 1</div>
+        <span class="patient-risk risk-${p.current_risk}">${p.current_risk}</span>
+      </div>`).join('');
+  } catch {
+    // Backend not running — show demo card
+    document.getElementById('patientList').innerHTML = `
+      <div class="patient-card active" id="card-patient_001">
+        <div class="patient-name">Patient 001</div>
+        <div class="patient-ward">ICU — Bed 1</div>
+        <span class="patient-risk risk-UNKNOWN">DEMO</span>
+      </div>`;
+  }
+}
+
+// ── WebSocket ───────────────────────────────────────────────
+function connectWS() {
+  ws = new WebSocket(`${WS_BASE}/ws/${PATIENT}`);
+
+  ws.onopen = () => {
+    document.getElementById('statusText').textContent = 'Live';
+    document.getElementById('statusDot').style.background = 'var(--green)';
+    document.getElementById('connBanner').classList.remove('visible');
+    loadPatients();
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      updateVitals(data);
+    } catch(e) { console.warn('WS parse error', e); }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('statusText').textContent = 'Disconnected';
+    document.getElementById('statusDot').style.background = 'var(--red)';
+    document.getElementById('connBanner').classList.add('visible');
+    setTimeout(connectWS, 3000);  // auto-reconnect
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// ── Keep-alive ping ─────────────────────────────────────────
+setInterval(() => { if (ws?.readyState === 1) ws.send('ping'); }, 20000);
+
+// ── Demo mode (no backend) ──────────────────────────────────
+function runDemo() {
+  document.getElementById('statusText').textContent = 'DEMO MODE';
+  document.getElementById('statusDot').style.background = 'var(--yellow)';
+  loadPatients();
+
+  let hr = 75, spo2 = 98, temp = 36.8, mov = 1.0;
+  let crisis = false, crisisTimer = 0;
+
+  setInterval(() => {
+    if (Math.random() < 0.005 && !crisis) {
+      crisis = true; crisisTimer = 20;
+    }
+    if (crisis) {
+      hr   += Math.random() * 3;
+      spo2 -= Math.random() * 0.5;
+      mov   = 2 + Math.random() * 2;
+      crisisTimer--;
+      if (crisisTimer <= 0) { crisis = false; }
+    } else {
+      hr   += (Math.random()-0.5)*1.2;
+      spo2 += (Math.random()-0.5)*0.15;
+      temp += (Math.random()-0.5)*0.03;
+      mov   = Math.abs(0.9 + (Math.random()-0.5)*0.5);
+    }
+    hr   = Math.min(200, Math.max(40, hr));
+    spo2 = Math.min(100, Math.max(75, spo2));
+
+    const prob = crisis ? 0.80 + Math.random()*0.15 : 0.05 + Math.random()*0.1;
+    const risk = prob > 0.85 ? 'CRITICAL' : prob > 0.60 ? 'WARNING' : 'NORMAL';
+
+    updateVitals({
+      patient_id:  PATIENT,
+      HR:          Math.round(hr*10)/10,
+      SpO2:        Math.round(spo2*10)/10,
+      temperature: Math.round(temp*100)/100,
+      movement:    Math.round(mov*100)/100,
+      fall:        0,
+      inference:   { risk, probability: prob }
+    });
+  }, 1000);
+}
+
+// ── Init ────────────────────────────────────────────────────
+try {
+  connectWS();
+  // If WS fails after 2s, switch to demo
+  setTimeout(() => {
+    if (!ws || ws.readyState !== 1) runDemo();
+  }, 2000);
+} catch { runDemo(); }
+</script>
+</body>
+</html>

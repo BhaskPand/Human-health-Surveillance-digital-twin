@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Digital Twin — Hospital Patient Monitor</title>
+  <style>
+    :root {
+      --bg:       #0a0f1e;
+      --card:     #111827;
+      --border:   #1f2937;
+      --text:     #e5e7eb;
+      --muted:    #6b7280;
+      --green:    #10b981;
+      --yellow:   #f59e0b;
+      --red:      #ef4444;
+      --blue:     #3b82f6;
+      --purple:   #8b5cf6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 20px;
+    }
+    .header-left h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.3px; }
+    .header-left span { font-size: .8rem; color: var(--muted); }
+    .conn-badge {
+      padding: 4px 12px; border-radius: 20px; font-size: .75rem; font-weight: 600;
+      background: #1a2a1a; color: var(--green); border: 1px solid var(--green);
+    }
+    .conn-badge.disconnected { background:#2a1a1a; color:var(--red); border-color:var(--red); }
+
+    /* ── Patient Info Bar ── */
+    .patient-bar {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 20px;
+      display: flex; align-items: center; gap: 24px; margin-bottom: 16px;
+    }
+    .patient-bar .avatar {
+      width:44px; height:44px; border-radius:50%; background:#1d4ed8;
+      display:flex; align-items:center; justify-content:center; font-size:1.4rem;
+    }
+    .patient-bar .info h3 { font-size:.95rem; font-weight:600; }
+    .patient-bar .info p  { font-size:.75rem; color:var(--muted); }
+    .risk-badge {
+      margin-left:auto; padding:6px 16px; border-radius:20px;
+      font-size:.85rem; font-weight:700; transition: all .3s;
+    }
+    .risk-NORMAL   { background:#052e16; color:#34d399; border:1px solid #34d399; }
+    .risk-WARNING  { background:#451a03; color:#fbbf24; border:1px solid #fbbf24; }
+    .risk-CRITICAL { background:#450a0a; color:#f87171; border:1px solid #f87171;
+                     animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+    /* ── Vital Cards Grid ── */
+    .vitals-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px; margin-bottom: 16px;
+    }
+    .vital-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px;
+      display: flex; flex-direction: column; gap: 8px;
+      transition: border-color .3s;
+    }
+    .vital-card.alert { border-color: var(--red); }
+    .vital-card .label { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+    .vital-card .value { font-size:2.4rem; font-weight:700; line-height:1; }
+    .vital-card .unit  { font-size:.8rem; color:var(--muted); }
+    .vital-card .bar-track {
+      height:4px; background:var(--border); border-radius:2px; overflow:hidden;
+    }
+    .vital-card .bar-fill {
+      height:100%; border-radius:2px; transition: width .5s ease;
+    }
+    .vital-card .range  { font-size:.68rem; color:var(--muted); }
+
+    /* ── Two-column lower section ── */
+    .lower-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;
+    }
+
+    /* ── Chart area ── */
+    .chart-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px;
+    }
+    .chart-card h3 { font-size:.85rem; color:var(--muted); margin-bottom:12px; }
+    canvas { width:100% !important; }
+
+    /* ── Alert log ── */
+    .alert-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px; display:flex; flex-direction:column;
+    }
+    .alert-card h3 { font-size:.85rem; color:var(--muted); margin-bottom:12px; }
+    .alert-list { flex:1; overflow-y:auto; max-height:240px; display:flex; flex-direction:column; gap:8px; }
+    .alert-item {
+      background:#1a0a0a; border:1px solid #3d1515; border-radius:8px;
+      padding:8px 12px; font-size:.78rem;
+    }
+    .alert-item .alert-time { color:var(--muted); font-size:.7rem; }
+    .alert-item .alert-vals { color:var(--red); font-weight:600; margin-top:2px; }
+    .no-alerts { color:var(--muted); font-size:.8rem; text-align:center; padding:20px; }
+
+    /* ── Footer stats ── */
+    .footer-stats {
+      display:flex; gap:16px; font-size:.72rem; color:var(--muted);
+      border-top:1px solid var(--border); padding-top:12px; margin-top:4px;
+      flex-wrap:wrap;
+    }
+    .footer-stats span b { color:var(--text); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>🏥 Digital Twin — Patient Monitor</h1>
+    <span>Real-time ML-powered health surveillance</span>
+  </div>
+  <div id="connBadge" class="conn-badge disconnected">⚪ Disconnected</div>
+</header>
+
+<!-- Patient Bar -->
+<div class="patient-bar">
+  <div class="avatar">🧑‍⚕️</div>
+  <div class="info">
+    <h3>Patient: patient_001</h3>
+    <p id="lastUpdate">Waiting for data...</p>
+  </div>
+  <div id="riskBadge" class="risk-badge risk-NORMAL">🟢 NORMAL</div>
+</div>
+
+<!-- Vital Cards -->
+<div class="vitals-grid">
+  <!-- Heart Rate -->
+  <div class="vital-card" id="card-hr">
+    <div class="label">❤️ Heart Rate</div>
+    <div><span class="value" id="val-hr">--</span> <span class="unit">bpm</span></div>
+    <div class="bar-track"><div class="bar-fill" id="bar-hr" style="background:var(--red);width:0%"></div></div>
+    <div class="range">Normal: 60–100 bpm</div>
+  </div>
+  <!-- SpO2 -->
+  <div class="vital-card" id="card-spo2">
+    <div class="label">💨 SpO₂</div>
+    <div><span class="value" id="val-spo2">--</span> <span class="unit">%</span></div>
+    <div class="bar-track"><div class="bar-fill" id="bar-spo2" style="background:var(--blue);width:0%"></div></div>
+    <div class="range">Normal: ≥ 95%</div>
+  </div>
+  <!-- Temperature -->
+  <div class="vital-card" id="card-temp">
+    <div class="label">🌡️ Temperature</div>
+    <div><span class="value" id="val-temp">--</span> <span class="unit">°C</span></div>
+    <div class="bar-track"><div class="bar-fill" id="bar-temp" style="background:var(--yellow);width:0%"></div></div>
+    <div class="range">Normal: 36.1–37.2°C</div>
+  </div>
+  <!-- Movement -->
+  <div class="vital-card" id="card-mov">
+    <div class="label">🏃 Movement</div>
+    <div><span class="value" id="val-mov">--</span> <span class="unit">mag</span></div>
+    <div class="bar-track"><div class="bar-fill" id="bar-mov" style="background:var(--purple);width:0%"></div></div>
+    <div class="range">Rest: &lt; 1.5</div>
+  </div>
+  <!-- Risk Probability -->
+  <div class="vital-card" id="card-risk">
+    <div class="label">🤖 ML Risk Score</div>
+    <div><span class="value" id="val-prob">--</span> <span class="unit">%</span></div>
+    <div class="bar-track"><div class="bar-fill" id="bar-prob" style="background:var(--green);width:0%"></div></div>
+    <div class="range">Critical: &gt; 85%</div>
+  </div>
+  <!-- Fall Status -->
+  <div class="vital-card" id="card-fall">
+    <div class="label">⚠️ Fall Detection</div>
+    <div><span class="value" id="val-fall" style="font-size:1.8rem">No Fall</span></div>
+    <div class="range">Accelerometer-based</div>
+  </div>
+</div>
+
+<!-- Charts + Alerts -->
+<div class="lower-grid">
+  <div class="chart-card">
+    <h3>HEART RATE TREND (last 60s)</h3>
+    <canvas id="hrChart" height="140"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>SpO₂ TREND (last 60s)</h3>
+    <canvas id="spo2Chart" height="140"></canvas>
+  </div>
+</div>
+
+<div class="alert-card">
+  <h3>⚠️ CRITICAL ALERT LOG</h3>
+  <div class="alert-list" id="alertList">
+    <div class="no-alerts">No alerts yet — system monitoring...</div>
+  </div>
+</div>
+
+<div class="footer-stats">
+  <span>Model: <b>RF + GB Ensemble</b></span>
+  <span>Backend: <b id="backendUrl">http://localhost:8000</b></span>
+  <span>Readings: <b id="readingCount">0</b></span>
+  <span>Alerts: <b id="alertCount">0</b></span>
+  <span>Session: <b id="sessionTime">0s</b></span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const WS_URL      = 'ws://localhost:8000/ws';
+const API_URL     = 'http://localhost:8000';
+const MAX_POINTS  = 60;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let readingCount = 0, alertCount = 0, sessionStart = Date.now();
+let hrData = Array(MAX_POINTS).fill(null), spo2Data = Array(MAX_POINTS).fill(null);
+let labels  = Array(MAX_POINTS).fill('');
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+const chartDefaults = {
+  type: 'line',
+  options: {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { display: false },
+      y: { grid: { color: '#1f2937' }, ticks: { color: '#6b7280', font: { size: 10 } } }
+    },
+    elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } }
+  }
+};
+
+const hrChart = new Chart(document.getElementById('hrChart'), {
+  ...chartDefaults,
+  data: {
+    labels,
+    datasets: [{ data: hrData, borderColor: '#ef4444', fill: true,
+      backgroundColor: 'rgba(239,68,68,0.08)' }]
+  },
+  options: { ...chartDefaults.options,
+    scales: { ...chartDefaults.options.scales,
+      y: { ...chartDefaults.options.scales.y, min: 40, max: 180,
+           suggestedMin: 50, suggestedMax: 150 } } }
+});
+
+const spo2Chart = new Chart(document.getElementById('spo2Chart'), {
+  ...chartDefaults,
+  data: {
+    labels,
+    datasets: [{ data: spo2Data, borderColor: '#3b82f6', fill: true,
+      backgroundColor: 'rgba(59,130,246,0.08)' }]
+  },
+  options: { ...chartDefaults.options,
+    scales: { ...chartDefaults.options.scales, y: { ...chartDefaults.options.scales.y, min: 70, max: 100 } } }
+});
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connect() {
+  const ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    document.getElementById('connBadge').textContent = '🟢 Connected';
+    document.getElementById('connBadge').classList.remove('disconnected');
+  };
+
+  ws.onclose = () => {
+    document.getElementById('connBadge').textContent = '⚪ Disconnected';
+    document.getElementById('connBadge').classList.add('disconnected');
+    setTimeout(connect, 3000);  // auto-reconnect
+  };
+
+  ws.onmessage = (event) => {
+    try { updateDashboard(JSON.parse(event.data)); }
+    catch(e) { console.error('Parse error:', e); }
+  };
+}
+
+// ── Update Dashboard ──────────────────────────────────────────────────────────
+function updateDashboard(d) {
+  readingCount++;
+  const ts = new Date().toLocaleTimeString();
+
+  // Patient bar
+  document.getElementById('lastUpdate').textContent = `Last update: ${ts}`;
+  document.getElementById('readingCount').textContent = readingCount;
+
+  // Session timer
+  const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+  document.getElementById('sessionTime').textContent =
+    elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed/60)}m ${elapsed%60}s`;
+
+  // Risk badge
+  const risk = d.risk_level || 'NORMAL';
+  const badge = document.getElementById('riskBadge');
+  badge.className = `risk-badge risk-${risk}`;
+  const em = { NORMAL:'🟢', WARNING:'🟡', CRITICAL:'🔴' };
+  badge.textContent = `${em[risk]||''} ${risk}`;
+
+  // Heart Rate
+  if (d.HR != null) {
+    const hr = d.HR;
+    document.getElementById('val-hr').textContent = hr.toFixed(1);
+    document.getElementById('bar-hr').style.width = `${Math.min(100, (hr-30)/170*100)}%`;
+    document.getElementById('card-hr').classList.toggle('alert', hr > 100 || hr < 50);
+    hrData.push(hr); hrData.shift();
+    hrChart.data.datasets[0].data = [...hrData];
+    hrChart.update();
+  }
+
+  // SpO2
+  if (d.SpO2 != null) {
+    const s = d.SpO2;
+    document.getElementById('val-spo2').textContent = s.toFixed(1);
+    document.getElementById('bar-spo2').style.width = `${Math.max(0,(s-70)/30*100)}%`;
+    document.getElementById('card-spo2').classList.toggle('alert', s < 95);
+    spo2Data.push(s); spo2Data.shift();
+    spo2Chart.data.datasets[0].data = [...spo2Data];
+    spo2Chart.update();
+  }
+
+  // Temperature
+  if (d.temperature != null) {
+    const t = d.temperature;
+    document.getElementById('val-temp').textContent = t.toFixed(2);
+    document.getElementById('bar-temp').style.width = `${Math.max(0,(t-34)/8*100)}%`;
+    document.getElementById('card-temp').classList.toggle('alert', t > 37.5 || t < 36.0);
+  }
+
+  // Movement
+  if (d.movement != null) {
+    const m = d.movement;
+    document.getElementById('val-mov').textContent = m.toFixed(2);
+    document.getElementById('bar-mov').style.width = `${Math.min(100, m/10*100)}%`;
+  }
+
+  // ML Risk
+  if (d.probability != null) {
+    const p = d.probability * 100;
+    document.getElementById('val-prob').textContent = p.toFixed(1);
+    const barEl = document.getElementById('bar-prob');
+    barEl.style.width = `${p}%`;
+    barEl.style.background = p > 85 ? 'var(--red)' : p > 60 ? 'var(--yellow)' : 'var(--green)';
+  }
+
+  // Fall
+  if (d.fall != null) {
+    const fell = d.fall === 1;
+    const fallEl = document.getElementById('val-fall');
+    fallEl.textContent = fell ? '🚨 FALL!' : 'No Fall';
+    fallEl.style.color = fell ? 'var(--red)' : 'var(--green)';
+    document.getElementById('card-fall').classList.toggle('alert', fell);
+  }
+
+  // Critical alert log
+  if (risk === 'CRITICAL') {
+    alertCount++;
+    document.getElementById('alertCount').textContent = alertCount;
+    const list = document.getElementById('alertList');
+    const noAlert = list.querySelector('.no-alerts');
+    if (noAlert) noAlert.remove();
+    const item = document.createElement('div');
+    item.className = 'alert-item';
+    item.innerHTML = `
+      <div class="alert-time">${ts}</div>
+      <div class="alert-vals">
+        HR: ${(d.HR||0).toFixed(1)} bpm &nbsp;|&nbsp;
+        SpO₂: ${(d.SpO2||0).toFixed(1)}% &nbsp;|&nbsp;
+        Risk: ${((d.probability||0)*100).toFixed(1)}%
+      </div>`;
+    list.prepend(item);   // newest first
+    if (list.children.length > 20) list.lastChild.remove();
+  }
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+connect();
+setInterval(() => {
+  const e = Math.floor((Date.now() - sessionStart) / 1000);
+  document.getElementById('sessionTime').textContent =
+    e < 60 ? `${e}s` : `${Math.floor(e/60)}m ${e%60}s`;
+}, 1000);
+</script>
+</body>
+</html>
